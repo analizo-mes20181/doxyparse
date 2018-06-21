@@ -36,6 +36,7 @@
 #include <cstdlib>
 #include <sstream>
 #include <map>
+#include <exception>
 #include <qcstring.h>
 #include <qregexp.h>
 
@@ -174,7 +175,12 @@ std::string sanitizeString(std::string data) {
   QCString new_data = QCString(data.c_str());
   new_data.replace(QRegExp("\""), "");
   new_data.replace(QRegExp("\\"), ""); // https://github.com/analizo/analizo/issues/138
-  return !new_data.isEmpty() ? new_data.data() : "";
+
+  try { // if the new data is empty it is not possible instantiate a std::string
+    return new_data.data();
+  } catch (std::exception& e){
+    return "";
+  }
 }
 
 std::string argumentData(Argument *argument) {
@@ -259,6 +265,11 @@ static bool checkOverrideArg(ArgumentList *argList, MemberDef *md) {
   return false;
 }
 
+static inline bool isMemberDefReferable(MemberDef *rmd, MemberDef *md, ArgumentList *argList) {
+  return rmd->definitionType() == Definition::TypeMember &&
+         !ignoreStaticExternalCall(md, rmd) && !checkOverrideArg(argList, rmd);
+}
+
 void functionInformation(MemberDef* md) {
   int size = md->getEndBodyLine() - md->getStartBodyLine() + 1;
   printNumberOfLines(size);
@@ -273,7 +284,7 @@ void functionInformation(MemberDef* md) {
     MemberDef *rmd;
     printUses();
     for (msdi.toFirst(); (rmd=msdi.current()); ++msdi) {
-      if (rmd->definitionType() == Definition::TypeMember && !ignoreStaticExternalCall(md, rmd) && !checkOverrideArg(argList, rmd)) {
+      if (isMemberDefReferable(rmd, md, argList)) {
         referenceTo(rmd);
       }
     }
@@ -336,12 +347,8 @@ static void classInformation(ClassDef* cd) {
   }
 }
 
-static bool checkLanguage(std::string& filename, std::string extension) {
-  if (filename.find(extension, filename.size() - extension.size()) != std::string::npos) {
-    return true;
-  } else {
-    return false;
-  }
+inline static bool checkLanguage(const std::string& filename, const std::string& extension) {
+  return filename.find(extension, filename.size() - extension.size()) != std::string::npos;
 }
 
 /* Detects the programming language of the project. Actually, we only care
@@ -350,17 +357,7 @@ static void detectProgrammingLanguage(FileNameListIterator& fnli) {
   FileName* fn;
   for (fnli.toFirst(); (fn=fnli.current()); ++fnli) {
     std::string filename = fn->fileName();
-    if (
-        checkLanguage(filename, ".cc") ||
-        checkLanguage(filename, ".cxx") ||
-        checkLanguage(filename, ".cpp") ||
-        checkLanguage(filename, ".java") ||
-        checkLanguage(filename, ".py") ||
-        checkLanguage(filename, ".pyw") ||
-        checkLanguage(filename, ".cs")
-       ) {
-      is_c_code = false;
-    }
+    is_c_code = checkLanguage(filename, ".c") or checkLanguage(filename, ".h");
   }
 }
 
